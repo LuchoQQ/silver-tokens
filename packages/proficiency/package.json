@@ -1,0 +1,16 @@
+{
+  "name": "@silver-tokens/proficiency",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./cache-rate": "./cache-rate.ts",
+    "./model-mix": "./model-mix.ts",
+    "./tool-distribution": "./tool-distribution.ts",
+    "./fluency": "./fluency.ts",
+    "./sessions": "./sessions.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

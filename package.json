@@ -1,0 +1,21 @@
+{
+  "name": "silver-tokens",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "db:push": "bun --filter @silver-tokens/db db:push",
+    "db:studio": "bun --filter @silver-tokens/db db:studio",
+    "db:generate": "bun --filter @silver-tokens/db db:generate",
+    "db:migrate": "bun --filter @silver-tokens/db db:migrate"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "bun@1.2.0"
+}

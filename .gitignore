@@ -1,0 +1,34 @@
+CLAUDE.md
+/docs
+
+# Local Claude Code settings
+.claude/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+.next/
+dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Turbo
+.turbo/
+
+# Silver track ephemeral
+.silver-extract.mjs

@@ -1,0 +1,17 @@
+{
+  "name": "@silver-tokens/parsers",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./claude-code": "./claude-code.ts",
+    "./codex": "./codex.ts",
+    "./opencode": "./opencode.ts"
+  },
+  "dependencies": {
+    "@silver-tokens/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
