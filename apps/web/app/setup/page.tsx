@@ -23,12 +23,11 @@ export default async function SetupPage() {
     orderBy: desc(tokens.createdAt),
   });
 
-  if (!userToken || new Date(userToken.expiresAt) < new Date()) {
+  if (!userToken || (userToken.expiresAt && new Date(userToken.expiresAt) < new Date())) {
     const value = randomUUID();
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     const [newToken] = await db
       .insert(tokens)
-      .values({ userId, value, expiresAt })
+      .values({ userId, value, expiresAt: null })
       .returning();
     userToken = newToken;
   }
@@ -45,7 +44,7 @@ export default async function SetupPage() {
       }}
       mcpCommand={mcpCommand}
       token={userToken.value}
-      tokenExpires={userToken.expiresAt.toISOString()}
+      tokenExpires={userToken.expiresAt?.toISOString() ?? null}
     />
   );
 }

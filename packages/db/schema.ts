@@ -32,7 +32,9 @@ export const tokens = pgTable('tokens', {
     .references(() => users.id)
     .notNull(),
   value: text().unique().notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
+  // null = no expiry (typical for the auto-sync use case). Old tokens keep
+  // their explicit timestamp until consumed.
+  expiresAt: timestamp('expires_at'),
   usedAt: timestamp('used_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });

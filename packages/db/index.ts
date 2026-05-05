@@ -24,7 +24,9 @@ export async function validateToken(value: string) {
   });
 
   if (!token) return { valid: false as const, reason: 'Token not found' };
-  if (new Date(token.expiresAt) < new Date()) return { valid: false as const, reason: 'Token expired' };
+  if (token.expiresAt && new Date(token.expiresAt) < new Date()) {
+    return { valid: false as const, reason: 'Token expired' };
+  }
 
   return { valid: true as const, token, user: token.user };
 }

@@ -10,7 +10,7 @@ interface OnboardingProps {
   user?: SignedInUser;
   mcpCommand?: string;
   token?: string;
-  tokenExpires?: string;
+  tokenExpires?: string | null;
   signInAction?: () => Promise<void>;
 }
 
@@ -95,8 +95,10 @@ export function OnboardingDashboard({ user, mcpCommand, token, tokenExpires, sig
               <h4>Sign in with GitHub</h4>
               {isSignedIn ? (
                 <p>
-                  Connected as <strong style={{ color: 'var(--foreground)' }}>@{user?.handle}</strong>. Your token expires{' '}
-                  {tokenExpires ? new Date(tokenExpires).toLocaleDateString() : 'in 30 days'}.
+                  Connected as <strong style={{ color: 'var(--foreground)' }}>@{user?.handle}</strong>.{' '}
+                  {tokenExpires
+                    ? <>Your token expires {new Date(tokenExpires).toLocaleDateString()}.</>
+                    : <>Your token doesn&apos;t expire — revoke it in settings if it ever leaks.</>}
                 </p>
               ) : (
                 <>
