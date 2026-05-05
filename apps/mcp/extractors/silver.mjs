@@ -10,7 +10,34 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
-import { computeCost } from '@silver-tokens/shared/cost';
+
+// Inlined from packages/shared/cost.ts. This script runs standalone on the
+// candidate's machine via `node ./.silver-extract.mjs`, so it must depend on
+// node built-ins only — no workspace imports.
+const PRICING = {
+	opus: { input: 15, output: 75, cacheRead: 1.5, cacheCreation: 18.75 },
+	sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheCreation: 3.75 },
+	haiku: { input: 1, output: 5, cacheRead: 0.1, cacheCreation: 1.25 },
+	gpt5: { input: 1.25, output: 10, cacheRead: 0.125, cacheCreation: 1.25 },
+};
+function pricingFor(model) {
+	const m = String(model).toLowerCase();
+	if (m.includes('opus')) return PRICING.opus;
+	if (m.includes('sonnet')) return PRICING.sonnet;
+	if (m.includes('haiku')) return PRICING.haiku;
+	if (m.startsWith('gpt-5')) return PRICING.gpt5;
+	return null;
+}
+function computeCost(model, tokens) {
+	const p = pricingFor(model);
+	if (!p) return 0;
+	const cost
+		= ((tokens.input ?? 0) * p.input
+			+ (tokens.output ?? 0) * p.output
+			+ (tokens.cacheRead ?? 0) * p.cacheRead
+			+ (tokens.cacheCreation ?? 0) * p.cacheCreation) / 1_000_000;
+	return Math.round(cost * 1e6) / 1e6;
+}
 
 const HOME = process.env.HOME ?? process.env.USERPROFILE ?? '';
 
