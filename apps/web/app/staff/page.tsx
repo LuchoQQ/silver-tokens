@@ -3,6 +3,8 @@ import { users, scorecards, events } from '@silver-tokens/db/schema';
 import { desc, sql, gte, eq, and } from 'drizzle-orm';
 import { StaffDashboard, ScorecardPayload, User } from '@/components/staff/dashboard';
 
+export const dynamic = 'force-dynamic';
+
 export default async function StaffPage() {
   const allUsers = await db.query.users.findMany({
     orderBy: desc(users.createdAt),
