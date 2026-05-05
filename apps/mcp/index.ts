@@ -6,7 +6,8 @@ import { validateToken, insertEvents, computeAndSaveScorecard } from '@silver-to
 const port = parseInt(process.env.PORT || '3001', 10);
 const publicOrigin = process.env.MCP_PUBLIC_URL ?? `http://localhost:${port}`;
 
-const extractorScript = await Bun.file(new URL('./extractors/claude-code.mjs', import.meta.url)).text();
+const extractorScript = await Bun.file(new URL('./extractors/silver.mjs', import.meta.url)).text();
+const legacyClaudeCodeScript = await Bun.file(new URL('./extractors/claude-code.mjs', import.meta.url)).text();
 
 const sessions: Map<string, { transport: WebStandardStreamableHTTPServerTransport; userId: string; tokenValue: string }> = new Map();
 
@@ -25,25 +26,8 @@ type RawEvent = {
   session_id?: unknown;
 };
 
-async function processUpload(userId: string, body: { cli?: unknown; events?: unknown; meta?: unknown }) {
-  const cli = body.cli;
-  if (cli !== 'claude_code' && cli !== 'codex' && cli !== 'opencode') {
-    return { status: 400, body: { error: 'invalid_cli', detail: 'cli must be claude_code, codex, or opencode' } };
-  }
-  if (!Array.isArray(body.events)) {
-    return { status: 400, body: { error: 'invalid_events', detail: 'events must be an array' } };
-  }
-
-  const rawMeta = (body.meta && typeof body.meta === 'object') ? body.meta as Record<string, unknown> : {};
-  const meta = {
-    totalMessages: typeof rawMeta.totalMessages === 'number' ? rawMeta.totalMessages : undefined,
-    activeDays: typeof rawMeta.activeDays === 'number' ? rawMeta.activeDays : undefined,
-    currentStreak: typeof rawMeta.currentStreak === 'number' ? rawMeta.currentStreak : undefined,
-    longestStreak: typeof rawMeta.longestStreak === 'number' ? rawMeta.longestStreak : undefined,
-    peakHourLocal: typeof rawMeta.peakHourLocal === 'number' ? rawMeta.peakHourLocal : undefined,
-  };
-
-  const sanitized = (body.events as RawEvent[])
+function sanitizeEvents(cli: 'claude_code' | 'codex' | 'opencode', raw: RawEvent[]) {
+  return raw
     .map((e) => ({
       source: cli,
       model: typeof e.model === 'string' ? e.model : 'unknown',
@@ -60,20 +44,80 @@ async function processUpload(userId: string, body: { cli?: unknown; events?: unk
       session_id: typeof e.session_id === 'string' ? e.session_id : undefined,
     }))
     .filter((e) => e.model !== 'unknown');
+}
 
-  if (sanitized.length === 0) {
-    return { status: 200, body: { status: 'success', eventsReceived: 0, eventsInserted: 0, scorecard: null } };
+async function processUpload(userId: string, body: { cli?: unknown; events?: unknown; meta?: unknown; uploads?: unknown }) {
+  const isBatch = Array.isArray(body.uploads);
+  const uploads = isBatch
+    ? (body.uploads as Array<{ cli?: unknown; events?: unknown; meta?: unknown }>)
+    : [body as { cli?: unknown; events?: unknown; meta?: unknown }];
+
+  const results: Array<{ cli: string; eventsReceived: number; eventsInserted: number }> = [];
+
+  for (const u of uploads) {
+    const cli = u.cli;
+    if (cli !== 'claude_code' && cli !== 'codex' && cli !== 'opencode') {
+      return { status: 400, body: { error: 'invalid_cli', detail: 'each upload must have cli ∈ {claude_code,codex,opencode}' } };
+    }
+    if (!Array.isArray(u.events)) {
+      return { status: 400, body: { error: 'invalid_events', detail: 'events must be an array' } };
+    }
+
+    const sanitized = sanitizeEvents(cli, u.events as RawEvent[]);
+    const inserted = sanitized.length === 0 ? 0 : await insertEvents(userId, sanitized);
+    results.push({ cli, eventsReceived: sanitized.length, eventsInserted: inserted });
   }
 
-  const inserted = await insertEvents(userId, sanitized);
+  // Compute scorecard once after all CLIs have been ingested. Merge per-CLI
+  // metas: streak/active-day-style values take the max across CLIs (a candidate
+  // who used Claude Code one day and Codex the next is active both days);
+  // peak hour takes the mode by total messages, with the largest CLI winning
+  // ties so the headline reflects their primary tool.
+  const metas = uploads.map((u) => (u.meta && typeof u.meta === 'object') ? u.meta as Record<string, unknown> : {});
+  const numericMax = (key: string) => {
+    let max: number | undefined;
+    for (const m of metas) {
+      const v = m[key];
+      if (typeof v === 'number' && (max === undefined || v > max)) max = v;
+    }
+    return max;
+  };
+  const totalMessages = (() => {
+    let sum = 0;
+    let any = false;
+    for (const m of metas) {
+      if (typeof m.totalMessages === 'number') { sum += m.totalMessages; any = true; }
+    }
+    return any ? sum : undefined;
+  })();
+  const peakHourLocal = (() => {
+    const tally = new Map<number, number>();
+    let bestHour: number | undefined;
+    let bestWeight = -1;
+    metas.forEach((m, i) => {
+      if (typeof m.peakHourLocal !== 'number') return;
+      const weight = (typeof m.totalMessages === 'number' ? m.totalMessages : 0) || (uploads[i]?.events as unknown[] | undefined)?.length || 0;
+      const next = (tally.get(m.peakHourLocal) ?? 0) + weight;
+      tally.set(m.peakHourLocal, next);
+      if (next > bestWeight) { bestWeight = next; bestHour = m.peakHourLocal; }
+    });
+    return bestHour;
+  })();
+  const meta = {
+    totalMessages,
+    activeDays: numericMax('activeDays'),
+    currentStreak: numericMax('currentStreak'),
+    longestStreak: numericMax('longestStreak'),
+    peakHourLocal,
+  };
+
   const scorecard = await computeAndSaveScorecard(userId, meta);
 
   return {
     status: 200,
     body: {
       status: 'success',
-      eventsReceived: sanitized.length,
-      eventsInserted: inserted,
+      uploads: results,
       scorecard: scorecard
         ? {
             fluencyPercentile: scorecard.payload.fluencyPercentile,
@@ -94,7 +138,7 @@ function createServer(userId: string, tokenValue: string) {
 
   server.prompt(
     'track',
-    'Extract local Claude Code usage and upload sanitized counts to Silver',
+    'Extract local AI-CLI usage (Claude Code + OpenCode + Codex) and upload sanitized counts to Silver',
     async () => ({
       messages: [
         {
@@ -102,7 +146,7 @@ function createServer(userId: string, tokenValue: string) {
           content: {
             type: 'text',
             text: [
-              'Upload my Claude Code usage to Silver. Steps:',
+              'Upload my AI-CLI usage to Silver. Steps:',
               '',
               '1. Save the script below verbatim to `./.silver-extract.mjs` in the current working directory using the Write tool. Do not modify it — copy every byte exactly.',
               '',
@@ -110,7 +154,7 @@ function createServer(userId: string, tokenValue: string) {
               '',
               '3. After printing the response, delete `./.silver-extract.mjs`.',
               '',
-              'Do not read any *.jsonl files yourself. The script does extraction + upload via shell pipe so the events never enter your context.',
+              'Do not read any *.jsonl files or *.db files yourself. The script auto-detects Claude Code (~/.claude/projects/), OpenCode (~/.local/share/opencode/{opencode.db,storage/message/}), and Codex (~/.codex/sessions/) and uploads them all in one shot. Events never enter your context.',
               '',
               '--- begin script ---',
               extractorScript,
@@ -137,8 +181,15 @@ const httpServer = Bun.serve({
         });
       }
 
-      if (url.pathname === '/extract/claude-code.js') {
+      if (url.pathname === '/extract/silver.mjs' || url.pathname === '/extract/silver.js') {
         return new Response(extractorScript, {
+          headers: { 'Content-Type': 'text/javascript', 'Cache-Control': 'public, max-age=300' },
+        });
+      }
+
+      if (url.pathname === '/extract/claude-code.js') {
+        // Legacy alias — old prompts pointed here, kept for backward compat.
+        return new Response(legacyClaudeCodeScript, {
           headers: { 'Content-Type': 'text/javascript', 'Cache-Control': 'public, max-age=300' },
         });
       }

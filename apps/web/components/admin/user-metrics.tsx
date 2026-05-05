@@ -15,6 +15,7 @@ interface ScorecardPayload {
     currentStreak?: number;
     longestStreak?: number;
     peakHour?: number | null;
+    peakHourSource?: 'local' | 'utc';
     favoriteModel?: string | null;
   };
 }
@@ -54,39 +55,50 @@ interface UserMetricsProps {
 
 export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
   const payload = scorecard?.payload as ScorecardPayload | undefined;
-  const totalCost = events.reduce((sum, e) => sum + parseFloat(e.costUsd ?? '0'), 0);
   // Prefer payload values (computed server-side over all events) over the
   // partial values from the recent-100-events slice rendered in the table.
   const sessions = payload?.sessions?.totalSessions ?? new Set(events.map((e) => e.sessionId).filter(Boolean)).size;
   const totalTokens = payload?.activity?.totalTokens ?? events.reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
   const avgTokensPerSession = payload?.sessions?.avgTokensPerSession ?? (sessions > 0 ? totalTokens / sessions : 0);
+  const peakHourLabel = payload?.activity?.peakHourSource === 'local' ? 'Peak Hour (local)' : 'Peak Hour (UTC)';
 
   return (
     <div className="space-y-6">
       {/* Hero metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <MetricCard label="Fluency Percentile" value={payload?.fluencyPercentile != null ? `${payload.fluencyPercentile}%` : '--'} />
         <MetricCard label="Cache Rate" value={payload?.cacheRate != null ? `${(payload.cacheRate * 100).toFixed(1)}%` : '--'} />
         <MetricCard label="Sessions" value={sessions > 0 ? sessions.toString() : '--'} />
-        <MetricCard label="Total Cost" value={events.length > 0 ? `$${totalCost.toFixed(2)}` : '--'} />
       </div>
 
-      {/* Secondary metrics */}
+      {/* Secondary metrics. Total Tokens excludes cache reads/creations on
+          purpose — those are reported via Cache Rate. ccusage adds them in,
+          so our number will be ~3× smaller than ccusage's headline. */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MetricCard label="Total Tokens" value={totalTokens > 0 ? formatTokens(totalTokens) : '--'} />
+        <MetricCard
+          label="Total Tokens"
+          value={totalTokens > 0 ? formatTokens(totalTokens) : '--'}
+          title="Σ(input + output). Excludes cache reads/creations — those are tracked separately as Cache Rate."
+        />
         <MetricCard label="Avg Tokens/Session" value={sessions > 0 ? Math.round(avgTokensPerSession).toLocaleString() : '--'} />
         <MetricCard label="Confidence" value={payload?.confidence ?? '--'} />
       </div>
 
       {/* Activity — all values normalized to billable assistant turns so they
-          remain comparable across Claude Code / Codex / OpenCode. */}
+          remain comparable across Claude Code / Codex / OpenCode. ccusage
+          reports a higher "messages" number because it counts every JSONL
+          line; ours counts assistant turns only. */}
       {payload?.activity && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MetricCard label="Turns" value={payload.activity.messages?.toLocaleString() ?? '--'} />
+          <MetricCard
+            label="Assistant Turns"
+            value={payload.activity.messages?.toLocaleString() ?? '--'}
+            title="One per assistant response across Claude Code / Codex / OpenCode. Differs from ccusage, which counts every JSONL line."
+          />
           <MetricCard label="Active Days" value={payload.activity.activeDays?.toString() ?? '--'} />
           <MetricCard label="Current Streak" value={payload.activity.currentStreak != null ? `${payload.activity.currentStreak}d` : '--'} />
           <MetricCard label="Longest Streak" value={payload.activity.longestStreak != null ? `${payload.activity.longestStreak}d` : '--'} />
-          <MetricCard label="Peak Hour (UTC)" value={payload.activity.peakHour != null ? `${String(payload.activity.peakHour).padStart(2, '0')}:00` : '--'} />
+          <MetricCard label={peakHourLabel} value={payload.activity.peakHour != null ? `${String(payload.activity.peakHour).padStart(2, '0')}:00` : '--'} />
           <MetricCard label="Favorite Model" value={payload.activity.favoriteModel ?? '--'} />
         </div>
       )}
@@ -152,9 +164,9 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <div className="rounded-lg border p-4">
+    <div className="rounded-lg border p-4" title={title}>
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className="text-2xl font-bold mt-1">{value}</div>
     </div>

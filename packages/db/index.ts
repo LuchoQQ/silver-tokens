@@ -107,21 +107,29 @@ export async function computeAndSaveScorecard(userId: string, meta?: UploadMeta)
   const sessions = computeSessions(normalized);
   const activity = computeActivity(normalized);
 
-  // Note: extractors emit `meta` with raw JSONL line counts for telemetry, but we
-  // intentionally DO NOT override activity values with it. Different CLIs write
-  // different numbers of lines per assistant turn (Claude Code ~6-7, Codex ~1),
-  // so using line counts would inflate scorecards for users on chattier CLIs.
-  // Activity stays derived from the events table — one row per billable
-  // assistant turn — which is the only unit comparable across CLIs.
-  void meta;
+  // The events table holds UTC timestamps, so activity-derived values
+  // (activeDays, streaks, peakHour) are computed in UTC. The extractor runs on
+  // the candidate's machine and knows their local timezone, so when it sends
+  // local-tz values via `meta` we prefer those for the headline. We never let
+  // `meta.totalMessages` (raw JSONL line count) override anything — that's
+  // CLI-specific noise. See `apps/mcp/extractors/silver.mjs::buildMeta`.
+  const localActivity = {
+    ...activity,
+    activeDays: typeof meta?.activeDays === 'number' ? meta.activeDays : activity.activeDays,
+    currentStreak: typeof meta?.currentStreak === 'number' ? meta.currentStreak : activity.currentStreak,
+    longestStreak: typeof meta?.longestStreak === 'number' ? meta.longestStreak : activity.longestStreak,
+    peakHour: typeof meta?.peakHourLocal === 'number' ? meta.peakHourLocal : activity.peakHour,
+    peakHourSource: typeof meta?.peakHourLocal === 'number' ? 'local' : 'utc',
+  };
 
   const payload = {
     fluencyPercentile: 50,
     cacheRate: cacheRate.rate30d,
+    cacheRateWindows: cacheRate,
     modelMix,
     toolDistribution: toolDist,
     sessions,
-    activity,
+    activity: localActivity,
     confidence: 'medium',
     totalEvents: userEvents.length,
     computedAt: new Date().toISOString(),
