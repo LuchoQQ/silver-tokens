@@ -10,12 +10,12 @@ interface DbUser {
   id: string;
   githubLogin: string;
   email: string | null;
-  role: string;
+  role: string | null;
   createdAt: Date;
 }
 
 interface DbScorecard {
-  payload: ScorecardPayload;
+  payload: unknown;
   computedAt: Date;
 }
 
@@ -26,21 +26,22 @@ interface DbEvent {
   ts: Date;
   inputTokens: number;
   outputTokens: number;
-  cacheRead: number;
-  cacheCreation: number;
-  costUsd: string;
+  cacheRead: number | null;
+  cacheCreation: number | null;
+  costUsd: string | null;
   toolName: string | null;
+  sessionId: string | null;
 }
 
 interface UserMetricsProps {
   user: DbUser;
-  scorecard: DbScorecard | null;
+  scorecard: DbScorecard | null | undefined;
   events: DbEvent[];
 }
 
 export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
-  const payload = scorecard?.payload;
-  const totalCost = events.reduce((sum, e) => sum + parseFloat(e.costUsd), 0);
+  const payload = scorecard?.payload as ScorecardPayload | undefined;
+  const totalCost = events.reduce((sum, e) => sum + parseFloat(e.costUsd ?? '0'), 0);
   const totalTokens = events.reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
   const sessions = new Set(events.map((e) => e.sessionId).filter(Boolean)).size;
 

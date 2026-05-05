@@ -14,10 +14,10 @@ interface UserRow {
   id: string;
   githubLogin: string;
   email: string | null;
-  role: string;
+  role: string | null;
   createdAt: Date;
   scorecards: Array<{
-    payload: ScorecardPayload;
+    payload: unknown;
     computedAt: Date;
   }>;
 }
@@ -46,7 +46,7 @@ export function UserTable({ users }: { users: UserRow[] }) {
           )}
           {users.map((user) => {
             const scorecard = user.scorecards[0];
-            const payload = scorecard?.payload;
+            const payload = scorecard?.payload as ScorecardPayload | undefined;
             const fluency = payload?.fluencyPercentile;
             const confidence = payload?.confidence;
             return (

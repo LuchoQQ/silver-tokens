@@ -1,0 +1,20 @@
+# Railway config for the silver-tokens MCP server.
+# Web app is deployed to Vercel; this file is for `apps/mcp` only.
+#
+# Service config in Railway UI must match:
+#   Root Directory: (leave empty — repo root, so bun workspace install resolves @silver-tokens/* packages)
+#   Watch Paths: apps/mcp/**, packages/**, bun.lock, package.json, railway.toml
+#
+# Required env vars on the Railway service:
+#   DATABASE_URL      Neon Postgres connection string (sslmode=require)
+#   PORT              Railway sets this automatically; the server reads it via process.env.PORT
+#   MCP_PUBLIC_URL    Public HTTPS URL of this service (e.g. https://mcp.silver.dev). Embedded in
+#                     the /mcp__silver__track prompt so candidates curl the right host.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

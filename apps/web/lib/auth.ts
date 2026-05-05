@@ -14,19 +14,13 @@ declare module 'next-auth' {
   }
 }
 
-declare module 'next-auth/jwt' {
-  interface JWT {
-    id: string;
-    role: string;
-  }
-}
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [GitHub],
   callbacks: {
     async jwt({ token, user, profile }) {
       if (profile) {
-        const githubId = Number((profile as { id: number }).id);
+        const rawProfile = profile as unknown as { id?: number | string; login?: string };
+        const githubId = Number(rawProfile.id);
         if (Number.isNaN(githubId)) {
           return token;
         }
@@ -37,27 +31,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (existingUser) {
           token.id = existingUser.id;
-          token.role = existingUser.role;
+          token.role = existingUser.role ?? 'candidate';
         } else {
           const [newUser] = await db
             .insert(users)
             .values({
               githubId,
-              githubLogin: (profile as { login: string }).login ?? 'unknown',
-              email: (user as { email?: string })?.email ?? null,
+              githubLogin: rawProfile.login ?? 'unknown',
+              email: (user as { email?: string | null })?.email ?? null,
               role: 'candidate',
             })
             .returning();
           token.id = newUser.id;
-          token.role = newUser.role;
+          token.role = newUser.role ?? 'candidate';
         }
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.id;
-        session.user.role = token.role;
+        session.user.id = token.id as string;
+        session.user.role = token.role as string;
       }
       return session;
     },

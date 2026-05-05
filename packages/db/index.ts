@@ -48,14 +48,15 @@ export async function insertEvents(userId: string, rawEvents: SafeEvent[]): Prom
     sessionId: e.session_id ?? null,
   }));
 
-  const result = await db
+  const inserted = await db
     .insert(events)
     .values(rows)
     .onConflictDoNothing({
       target: [events.messageId, events.requestId],
-    });
+    })
+    .returning({ id: events.id });
 
-  return result.rowCount ?? 0;
+  return inserted.length;
 }
 
 export async function markTokenUsed(value: string): Promise<void> {
@@ -72,10 +73,21 @@ export async function computeAndSaveScorecard(userId: string): Promise<{ payload
 
   if (userEvents.length === 0) return null;
 
-  const cacheRate = computeCacheRate(userEvents);
-  const modelMix = computeModelMix(userEvents);
-  const toolDist = computeToolDistribution(userEvents);
-  const sessions = computeSessions(userEvents);
+  const normalized = userEvents.map((e) => ({
+    ...e,
+    inputTokens: e.inputTokens ?? 0,
+    outputTokens: e.outputTokens ?? 0,
+    cacheRead: e.cacheRead ?? 0,
+    cacheCreation: e.cacheCreation ?? 0,
+    costUsd: e.costUsd ?? '0',
+    toolName: e.toolName ?? '',
+    sessionId: e.sessionId ?? '',
+  }));
+
+  const cacheRate = computeCacheRate(normalized);
+  const modelMix = computeModelMix(normalized);
+  const toolDist = computeToolDistribution(normalized);
+  const sessions = computeSessions(normalized);
 
   const payload = {
     fluencyPercentile: 50,
@@ -88,13 +100,7 @@ export async function computeAndSaveScorecard(userId: string): Promise<{ payload
     computedAt: new Date().toISOString(),
   };
 
-  const [scorecard] = await db
-    .insert(scorecards)
-    .values({
-      userId,
-      payload,
-    })
-    .returning();
+  await db.insert(scorecards).values({ userId, payload });
 
-  return scorecard;
+  return { payload };
 }
