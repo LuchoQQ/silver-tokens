@@ -9,6 +9,11 @@ export interface ScorecardPayload {
   modelMix?: Record<string, number>;
   toolDistribution?: Record<string, number>;
   confidence?: string;
+  activity?: {
+    messages?: number;
+    activeDays?: number;
+    favoriteModel?: string | null;
+  };
 }
 
 export interface User {
@@ -20,16 +25,18 @@ export interface User {
     payload: ScorecardPayload;
     computedAt: Date;
   }>;
-  events: Array<{
-    ts: Date;
-    sessionId: string;
-    costUsd: string;
-    toolName: string | null;
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-    cacheRead: number;
-  }>;
+  clis: string[];
+  spend: number;
+  activeLast30: number;
+  lastEventTs: Date | null;
+  inLast7d: boolean;
+}
+
+function humanizeCli(src: string): string {
+  if (src === 'claude_code') return 'Claude Code';
+  if (src === 'codex') return 'Codex';
+  if (src === 'opencode') return 'OpenCode';
+  return src;
 }
 
 interface StaffDashboardProps {
@@ -73,53 +80,43 @@ function Tile({ label, value, sub, featured }: { label: string; value: string | 
 export function StaffDashboard({ users: initialUsers }: StaffDashboardProps) {
   const [search, setSearch] = useState('');
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
   const candidates = initialUsers.map(u => {
     const scorecard = u.scorecards[0];
     const payload = scorecard?.payload as ScorecardPayload | undefined;
-    const userEvents = u.events || [];
-    
-    const uniqueSessions = new Set(userEvents.map(e => e.sessionId).filter(Boolean));
-    const activeDays = uniqueSessions.size;
-    const inLast7d = userEvents.some(e => e.ts && new Date(e.ts) > sevenDaysAgo);
-    const totalCost = userEvents.reduce((sum, e) => sum + parseFloat(e.costUsd || '0'), 0);
-    const totalTurns = userEvents.length;
-    const tools = new Set(userEvents.map(e => e.toolName).filter(Boolean));
-    const clis = Array.from(tools);
-    const topModel = userEvents[0]?.model || 'Unknown';
-    const lastTs = userEvents[0]?.ts;
-    
+
+    const totalTurns = payload?.activity?.messages ?? 0;
+    const favoriteModel = payload?.activity?.favoriteModel ?? 'Unknown';
+    const cacheRate = payload?.cacheRate ?? 0;
+
     const now = new Date();
     let lastSeen = 'Never';
-    if (lastTs) {
-      const diffMs = now.getTime() - new Date(lastTs).getTime();
+    if (u.lastEventTs) {
+      const diffMs = now.getTime() - new Date(u.lastEventTs).getTime();
       const diffMins = Math.floor(diffMs / 60000);
       const diffHours = Math.floor(diffMins / 60);
       const diffDays = Math.floor(diffHours / 24);
-      if (diffMins < 60) lastSeen = `${diffMins}m ago`;
+      if (diffMins < 60) lastSeen = `${Math.max(diffMins, 1)}m ago`;
       else if (diffHours < 24) lastSeen = `${diffHours}h ago`;
       else if (diffDays === 1) lastSeen = 'Yesterday';
       else if (diffDays < 7) lastSeen = `${diffDays}d ago`;
       else if (diffDays < 14) lastSeen = '1w ago';
-      else lastSeen = '2w ago';
+      else lastSeen = `${Math.floor(diffDays / 7)}w ago`;
     }
-    
+
     return {
       id: u.id,
       name: u.githubLogin,
       gh: u.githubLogin,
       img: u.id.charCodeAt(0) % 70,
       fluency: payload?.fluencyPercentile || 0,
-      cache: payload?.cacheRate || 0,
+      cache: cacheRate,
       turns: totalTurns,
-      days: `${activeDays}/30`,
-      clis,
-      fav: topModel,
-      cost: totalCost,
+      days: `${Math.min(u.activeLast30, 30)}/30`,
+      clis: u.clis.map(humanizeCli),
+      fav: favoriteModel,
+      cost: u.spend,
       last: lastSeen,
-      status: inLast7d ? 'active' : totalTurns > 0 ? 'stale' : 'cold',
+      status: u.inLast7d ? 'active' : totalTurns > 0 ? 'stale' : 'cold',
     };
   });
 
@@ -136,7 +133,7 @@ export function StaffDashboard({ users: initialUsers }: StaffDashboardProps) {
   const active = candidates.filter(c => c.status === 'active').length;
   const cacheValues = candidates.map(c => c.cache).filter(c => c > 0);
   const medianCache = cacheValues.length > 0
-    ? Math.round(cacheValues.sort((a, b) => a - b)[Math.floor(cacheValues.length / 2)])
+    ? Math.round(cacheValues.sort((a, b) => a - b)[Math.floor(cacheValues.length / 2)] * 100)
     : 0;
   const totalSpend = candidates.reduce((s, c) => s + c.cost, 0);
   const fluencyValues = candidates.map(c => c.fluency).filter(f => f > 0);

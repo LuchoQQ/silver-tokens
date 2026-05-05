@@ -1,10 +1,10 @@
 import { auth, signIn } from '@/lib/auth';
 import { db } from '@silver-tokens/db';
 import { tokens, scorecards, events, users } from '@silver-tokens/db/schema';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and, gte } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { OnboardingDashboard } from '@/components/onboarding/dashboard';
-import { UserDashboard, UserScorecardPayload, UserEvent } from '@/components/user/dashboard';
+import { UserDashboard, UserScorecardPayload, UserEvent, DailyCount } from '@/components/user/dashboard';
 
 export default async function HomePage() {
   const session = await auth();
@@ -65,6 +65,21 @@ export default async function HomePage() {
     limit: 100,
   });
 
+  // 26 weeks of daily counts for the heatmap. Aggregated server-side so we
+  // don't need to ship every event to the client.
+  const heatmapStart = new Date();
+  heatmapStart.setHours(0, 0, 0, 0);
+  heatmapStart.setDate(heatmapStart.getDate() - (7 * 26 - 1));
+  const dailyRows = await db
+    .select({
+      day: sql<string>`to_char(date_trunc('day', ${events.ts}), 'YYYY-MM-DD')`,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(events)
+    .where(and(eq(events.userId, userId), gte(events.ts, heatmapStart)))
+    .groupBy(sql`date_trunc('day', ${events.ts})`);
+  const dailyCounts: DailyCount[] = dailyRows.map((r) => ({ day: r.day, count: r.count }));
+
   const [{ count: poolCount }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(users);
@@ -93,6 +108,7 @@ export default async function HomePage() {
       }}
       payload={userScorecard.payload as UserScorecardPayload}
       events={typedEvents}
+      dailyCounts={dailyCounts}
       poolSize={poolCount}
     />
   );

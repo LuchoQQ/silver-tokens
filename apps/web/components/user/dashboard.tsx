@@ -33,10 +33,16 @@ export interface UserEvent {
   sessionId: string | null;
 }
 
+export interface DailyCount {
+  day: string;
+  count: number;
+}
+
 export interface UserDashboardProps {
   user: { id: string; name: string; githubLogin: string; avatarUrl?: string | null };
   payload: UserScorecardPayload | null | undefined;
   events: UserEvent[];
+  dailyCounts?: DailyCount[];
   poolSize?: number;
 }
 
@@ -76,28 +82,32 @@ function relativeTime(ts: Date | null | undefined): string {
   return `${Math.floor(days / 7)}w ago`;
 }
 
-function buildHeatmap(events: UserEvent[]): { row: number; col: number; lvl: number }[] {
+function buildHeatmap(daily: DailyCount[]): { cells: { row: number; col: number; lvl: number }[]; activeLast30: number } {
   const counts = new Map<string, number>();
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - 7 * 26 + 1);
-
-  for (const e of events) {
-    const t = new Date(e.ts);
-    if (t < start) continue;
-    const dayKey = `${t.getFullYear()}-${t.getMonth()}-${t.getDate()}`;
-    counts.set(dayKey, (counts.get(dayKey) ?? 0) + 1);
+  for (const d of daily) {
+    counts.set(d.day, (counts.get(d.day) ?? 0) + d.count);
   }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // 26 weeks × 7 days, ending today on the last column. Anchor the grid to
+  // start on the same weekday so today lands on row=getDay() of the last col.
+  const start = new Date(today);
+  start.setDate(today.getDate() - (7 * 26 - 1));
+
+  const dayKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   const cells: { row: number; col: number; lvl: number }[] = [];
   const max = Math.max(1, ...counts.values());
+
+  // Iterate column-major so the heatmap layout (grid-auto-flow: column) renders
+  // chronologically left-to-right.
   for (let col = 0; col < 26; col++) {
     for (let row = 0; row < 7; row++) {
       const day = new Date(start);
       day.setDate(start.getDate() + col * 7 + row);
-      const k = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
-      const v = counts.get(k) ?? 0;
+      const v = counts.get(dayKey(day)) ?? 0;
       let lvl = 0;
       if (v > 0) {
         const r = v / max;
@@ -106,7 +116,17 @@ function buildHeatmap(events: UserEvent[]): { row: number; col: number; lvl: num
       cells.push({ row, col, lvl });
     }
   }
-  return cells;
+
+  const cutoff = new Date(today);
+  cutoff.setDate(today.getDate() - 29);
+  let activeLast30 = 0;
+  for (const [k, v] of counts) {
+    if (v <= 0) continue;
+    const d = new Date(`${k}T00:00:00`);
+    if (d >= cutoff && d <= today) activeLast30++;
+  }
+
+  return { cells, activeLast30 };
 }
 
 function Tile({ label, value, sub, featured }: { label: string; value: string; sub?: React.ReactNode; featured?: boolean }) {
@@ -237,19 +257,19 @@ function BrandMark() {
   );
 }
 
-export function UserDashboard({ user, payload, events, poolSize = 0 }: UserDashboardProps) {
+export function UserDashboard({ user, payload, events, dailyCounts = [], poolSize = 0 }: UserDashboardProps) {
   const cacheRate = payload?.cacheRate ?? 0;
   const cachePct = Math.round(cacheRate * 100);
   const fluency = payload?.fluencyPercentile ?? 0;
   const messages = payload?.activity?.messages ?? events.length;
-  const activeDays = payload?.activity?.activeDays ?? 0;
+  const activeDaysTotal = payload?.activity?.activeDays ?? 0;
   const totalTokens = payload?.activity?.totalTokens ?? events.reduce((s, e) => s + e.inputTokens + e.outputTokens, 0);
 
   const spend30d = events.reduce((s, e) => s + parseFloat(e.costUsd ?? '0'), 0);
   const spendStr = `$${spend30d.toFixed(2)}`;
 
   const lastUpload = events[0]?.ts;
-  const heatmap = buildHeatmap(events);
+  const { cells: heatmap, activeLast30 } = buildHeatmap(dailyCounts);
 
   const modelMixEntries = payload?.modelMix ? Object.entries(payload.modelMix) : [];
   const modelTotal = modelMixEntries.reduce((s, [, v]) => s + v, 0) || 1;
@@ -342,8 +362,8 @@ export function UserDashboard({ user, payload, events, poolSize = 0 }: UserDashb
             sub={<span>{formatTokens(totalTokens)} tokens</span>}
           />
           <Tile
-            label="Active days"
-            value={`${activeDays} / 30`}
+            label="Active days · 30d"
+            value={`${activeLast30} / 30`}
             sub={
               payload?.activity?.currentStreak != null ? (
                 <span>🔥 {payload.activity.currentStreak}-day streak</span>
@@ -354,7 +374,7 @@ export function UserDashboard({ user, payload, events, poolSize = 0 }: UserDashb
             label="API-equiv · 30d"
             value={spendStr}
             sub={
-              activeDays > 0 ? <span>${(spend30d / activeDays).toFixed(2)} / active day</span> : undefined
+              activeLast30 > 0 ? <span>${(spend30d / activeLast30).toFixed(2)} / active day</span> : undefined
             }
           />
         </div>
@@ -363,7 +383,7 @@ export function UserDashboard({ user, payload, events, poolSize = 0 }: UserDashb
           <div className="panel">
             <div className="panel-head">
               <h3>Activity</h3>
-              <span className="meta">{activeDays} days · {messages.toLocaleString()} turns</span>
+              <span className="meta">{activeDaysTotal} days total · {messages.toLocaleString()} turns</span>
             </div>
             <Heatmap cells={heatmap} />
           </div>
