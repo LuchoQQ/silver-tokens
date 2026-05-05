@@ -47,6 +47,7 @@ export async function insertEvents(userId: string, rawEvents: SafeEvent[]): Prom
     messageId: e.message_id ?? null,
     requestId: e.request_id ?? null,
     sessionId: e.session_id ?? null,
+    isSubagent: e.is_subagent ?? false,
   }));
 
   // postgres-js caps bind parameters at 65534 per query. With 14 columns per row,
@@ -99,6 +100,7 @@ export async function computeAndSaveScorecard(userId: string, meta?: UploadMeta)
     costUsd: e.costUsd ?? '0',
     toolName: e.toolName ?? '',
     sessionId: e.sessionId ?? '',
+    isSubagent: e.isSubagent ?? false,
   }));
 
   const cacheRate = computeCacheRate(normalized);
@@ -107,17 +109,32 @@ export async function computeAndSaveScorecard(userId: string, meta?: UploadMeta)
   const sessions = computeSessions(normalized);
   const activity = computeActivity(normalized);
 
-  // The events table holds UTC timestamps, so activity-derived values
-  // (activeDays, streaks, peakHour) are computed in UTC. The extractor runs on
-  // the candidate's machine and knows their local timezone, so when it sends
-  // local-tz values via `meta` we prefer those for the headline. We never let
-  // `meta.totalMessages` (raw JSONL line count) override anything — that's
-  // CLI-specific noise. See `apps/mcp/extractors/silver.mjs::buildMeta`.
+  // Split sessions into root vs subagent. Each subagent invocation has its own
+  // sessionId in Claude Code's JSONL, so they show up as distinct sessions —
+  // but they're one logical "task call" of the user, not a separate workflow.
+  // Surfacing the split tells Gabriel "how often the candidate uses subagents",
+  // which is itself a proficiency signal (sub-tasks = parallelism, planning).
+  const rootSids = new Set<string>();
+  const subSids = new Set<string>();
+  for (const e of normalized) {
+    if (!e.sessionId) continue;
+    (e.isSubagent ? subSids : rootSids).add(e.sessionId);
+  }
+  const sessionSplit = { rootSessions: rootSids.size, subagentSessions: subSids.size };
+
+  // Activity values come from two sources: server-side (UTC, derived from all
+  // events ever uploaded) and client-side (local-tz, only this upload's range).
+  // For monotonic counters (active days, streaks) take the max — meta from a
+  // single recent upload must never degrade the all-time tally accumulated
+  // from prior uploads. Peak hour is a one-pick: prefer local when present.
+  const metaActiveDays = typeof meta?.activeDays === 'number' ? meta.activeDays : 0;
+  const metaCurrentStreak = typeof meta?.currentStreak === 'number' ? meta.currentStreak : 0;
+  const metaLongestStreak = typeof meta?.longestStreak === 'number' ? meta.longestStreak : 0;
   const localActivity = {
     ...activity,
-    activeDays: typeof meta?.activeDays === 'number' ? meta.activeDays : activity.activeDays,
-    currentStreak: typeof meta?.currentStreak === 'number' ? meta.currentStreak : activity.currentStreak,
-    longestStreak: typeof meta?.longestStreak === 'number' ? meta.longestStreak : activity.longestStreak,
+    activeDays: Math.max(activity.activeDays, metaActiveDays),
+    currentStreak: Math.max(activity.currentStreak, metaCurrentStreak),
+    longestStreak: Math.max(activity.longestStreak, metaLongestStreak),
     peakHour: typeof meta?.peakHourLocal === 'number' ? meta.peakHourLocal : activity.peakHour,
     peakHourSource: typeof meta?.peakHourLocal === 'number' ? 'local' : 'utc',
   };
@@ -128,7 +145,7 @@ export async function computeAndSaveScorecard(userId: string, meta?: UploadMeta)
     cacheRateWindows: cacheRate,
     modelMix,
     toolDistribution: toolDist,
-    sessions,
+    sessions: { ...sessions, ...sessionSplit },
     activity: localActivity,
     confidence: 'medium',
     totalEvents: userEvents.length,

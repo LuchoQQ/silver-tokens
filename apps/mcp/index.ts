@@ -24,6 +24,7 @@ type RawEvent = {
   message_id?: unknown;
   request_id?: unknown;
   session_id?: unknown;
+  is_subagent?: unknown;
 };
 
 function sanitizeEvents(cli: 'claude_code' | 'codex' | 'opencode', raw: RawEvent[]) {
@@ -42,6 +43,7 @@ function sanitizeEvents(cli: 'claude_code' | 'codex' | 'opencode', raw: RawEvent
       message_id: typeof e.message_id === 'string' ? e.message_id : undefined,
       request_id: typeof e.request_id === 'string' ? e.request_id : undefined,
       session_id: typeof e.session_id === 'string' ? e.session_id : undefined,
+      is_subagent: typeof e.is_subagent === 'boolean' ? e.is_subagent : false,
     }))
     .filter((e) => e.model !== 'unknown');
 }
@@ -109,6 +111,8 @@ async function processUpload(userId: string, body: { cli?: unknown; events?: unk
     currentStreak: numericMax('currentStreak'),
     longestStreak: numericMax('longestStreak'),
     peakHourLocal,
+    rootSessions: numericMax('rootSessions'),
+    subagentSessions: numericMax('subagentSessions'),
   };
 
   const scorecard = await computeAndSaveScorecard(userId, meta);

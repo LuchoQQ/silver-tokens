@@ -14,6 +14,7 @@ export const safeEventSchema = z.object({
   message_id: z.string().optional(),
   request_id: z.string().optional(),
   session_id: z.string().optional(),
+  is_subagent: z.boolean().default(false),
 });
 
 export type SafeEvent = z.infer<typeof safeEventSchema>;

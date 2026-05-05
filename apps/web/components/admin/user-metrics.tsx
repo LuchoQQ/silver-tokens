@@ -6,6 +6,8 @@ interface ScorecardPayload {
   confidence?: string;
   sessions?: {
     totalSessions?: number;
+    rootSessions?: number;
+    subagentSessions?: number;
     avgTokensPerSession?: number;
   };
   activity?: {
@@ -58,6 +60,11 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
   // Prefer payload values (computed server-side over all events) over the
   // partial values from the recent-100-events slice rendered in the table.
   const sessions = payload?.sessions?.totalSessions ?? new Set(events.map((e) => e.sessionId).filter(Boolean)).size;
+  const rootSessions = payload?.sessions?.rootSessions ?? (events.filter((e) => e.sessionId && !(e as { isSubagent?: boolean }).isSubagent).length > 0 ? new Set(events.filter((e) => e.sessionId && !(e as { isSubagent?: boolean }).isSubagent).map((e) => e.sessionId)).size : 0);
+  const subagentSessions = payload?.sessions?.subagentSessions ?? (events.filter((e) => e.sessionId && (e as { isSubagent?: boolean }).isSubagent).length > 0 ? new Set(events.filter((e) => e.sessionId && (e as { isSubagent?: boolean }).isSubagent).map((e) => e.sessionId)).size : 0);
+  const sessionsLabel = sessions > 0
+    ? (rootSessions != null && subagentSessions != null ? `${sessions} (${rootSessions} root + ${subagentSessions} subagent)` : sessions.toString())
+    : '--';
   const totalTokens = payload?.activity?.totalTokens ?? events.reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
   const avgTokensPerSession = payload?.sessions?.avgTokensPerSession ?? (sessions > 0 ? totalTokens / sessions : 0);
   const peakHourLabel = payload?.activity?.peakHourSource === 'local' ? 'Peak Hour (local)' : 'Peak Hour (UTC)';
@@ -68,7 +75,7 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         <MetricCard label="Fluency Percentile" value={payload?.fluencyPercentile != null ? `${payload.fluencyPercentile}%` : '--'} />
         <MetricCard label="Cache Rate" value={payload?.cacheRate != null ? `${(payload.cacheRate * 100).toFixed(1)}%` : '--'} />
-        <MetricCard label="Sessions" value={sessions > 0 ? sessions.toString() : '--'} />
+        <MetricCard label="Sessions" value={sessionsLabel} />
       </div>
 
       {/* Secondary metrics. Total Tokens excludes cache reads/creations on
@@ -78,7 +85,7 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
         <MetricCard
           label="Total Tokens"
           value={totalTokens > 0 ? formatTokens(totalTokens) : '--'}
-          title="Σ(input + output). Excludes cache reads/creations — those are tracked separately as Cache Rate."
+          title={'Σ(input + output) counted from local CLI logs on disk. May differ from Anthropic Cloud totals — Pro/Max accounts cannot expose the Admin API for cross-check. Re-run /mcp__silver__track from each machine to fill gaps.'}
         />
         <MetricCard label="Avg Tokens/Session" value={sessions > 0 ? Math.round(avgTokensPerSession).toLocaleString() : '--'} />
         <MetricCard label="Confidence" value={payload?.confidence ?? '--'} />
@@ -99,7 +106,7 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
           <MetricCard label="Current Streak" value={payload.activity.currentStreak != null ? `${payload.activity.currentStreak}d` : '--'} />
           <MetricCard label="Longest Streak" value={payload.activity.longestStreak != null ? `${payload.activity.longestStreak}d` : '--'} />
           <MetricCard label={peakHourLabel} value={payload.activity.peakHour != null ? `${String(payload.activity.peakHour).padStart(2, '0')}:00` : '--'} />
-          <MetricCard label="Favorite Model" value={payload.activity.favoriteModel ?? '--'} />
+          <MetricCard label="Favorite Model" value={payload.activity.favoriteModel ? prettyModel(payload.activity.favoriteModel) : '--'} title={payload.activity.favoriteModel ?? undefined} />
         </div>
       )}
 
@@ -110,7 +117,7 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
           <div className="space-y-2">
             {Object.entries(payload.modelMix).map(([model, pct]) => (
               <div key={model} className="flex items-center gap-2">
-                <span className="w-32 text-sm truncate" title={model}>{model}</span>
+                <span className="w-32 text-sm truncate" title={model}>{prettyModel(model)}</span>
                 <div className="flex-1 bg-muted rounded-full h-2">
                   <div className="bg-primary h-2 rounded-full" style={{ width: `${pct}%` }} />
                 </div>
@@ -149,7 +156,7 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
             {events.slice(0, 20).map((event) => (
               <div key={event.id} className="flex items-center gap-4 py-1 border-b last:border-0">
                 <span className="w-24 text-xs font-mono">{event.source}</span>
-                <span className="w-32 text-xs truncate" title={event.model}>{event.model}</span>
+                <span className="w-32 text-xs truncate" title={event.model}>{prettyModel(event.model)}</span>
                 <span className="w-20 text-xs font-mono">{(event.inputTokens + event.outputTokens).toLocaleString()}</span>
                 {event.toolName && <span className="w-24 text-xs">{event.toolName}</span>}
                 <span className="text-xs text-muted-foreground">
@@ -171,6 +178,26 @@ function MetricCard({ label, value, title }: { label: string; value: string; tit
       <div className="text-2xl font-bold mt-1">{value}</div>
     </div>
   );
+}
+
+// Map canonical model IDs to the display labels Claude /usage shows. Falls
+// back to the raw id for unknown models so OpenCode/Codex names that don't
+// match the table still render readably.
+function prettyModel(id: string): string {
+  if (!id) return id;
+  const lower = id.toLowerCase();
+  // Strip Anthropic date suffixes: claude-opus-4-5-20251101 → claude-opus-4-5
+  const base = lower.replace(/-\d{8}$/, '');
+  const map: Record<string, string> = {
+    'claude-opus-4-7': 'Opus 4.7',
+    'claude-opus-4-6': 'Opus 4.6',
+    'claude-opus-4-5': 'Opus 4.5',
+    'claude-sonnet-4-6': 'Sonnet 4.6',
+    'claude-haiku-4-5': 'Haiku 4.5',
+    'qwen3.6-plus': 'Qwen 3.6 Plus',
+    'minimax-m2.5-free': 'MiniMax M2.5',
+  };
+  return map[base] ?? id;
 }
 
 function formatTokens(n: number): string {

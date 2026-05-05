@@ -7,6 +7,7 @@ import {
   jsonb,
   decimal,
   uniqueIndex,
+  boolean,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -63,6 +64,7 @@ export const events = pgTable(
     messageId: text('message_id'),
     requestId: text('request_id'),
     sessionId: text('session_id'),
+    isSubagent: boolean('is_subagent').default(false),
   },
   (table) => ({
     dedupeIdx: uniqueIndex('dedupe_idx').on(table.messageId, table.requestId),

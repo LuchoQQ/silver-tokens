@@ -84,10 +84,12 @@ function extractClaudeCode() {
 	let totalMessages = 0;
 	const timestamps = [];
 	const hourCounts = new Array(24).fill(0);
+	const seen = new Set();
 
 	for (const file of files) {
 		let raw;
 		try { raw = readFileSync(file, 'utf8'); } catch { continue; }
+		const isSubagent = file.includes('_subagent');
 		for (const line of raw.split(/\r?\n/)) {
 			if (!line.trim()) continue;
 			let obj;
@@ -103,10 +105,22 @@ function extractClaudeCode() {
 			}
 
 			if (obj?.type !== 'assistant') continue;
+			// Compact summaries restate prior turns; counting them double-counts the work.
+			if (obj?.isCompactSummary === true) continue;
 			const msg = obj.message;
 			if (!msg || typeof msg !== 'object') continue;
 			const usage = msg.usage;
 			if (!usage || typeof usage !== 'object') continue;
+
+			const inp = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+			const out = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+			const cr = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+			const cc = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+			// Streaming bug #22686: Anthropic emits a placeholder usage event with
+			// output_tokens:1 and zero everything else before the final event lands.
+			// Same message.id can ship with a different requestId, so the DB unique
+			// index does not dedupe these. Drop at extraction.
+			if (out === 1 && inp === 0 && cr === 0 && cc === 0) continue;
 
 			let firstTool;
 			if (Array.isArray(msg.content)) {
@@ -121,25 +135,40 @@ function extractClaudeCode() {
 				? obj.requestId
 				: `cc-derived:${messageId}`;
 
+			const dedupKey = `${messageId}::${requestId}`;
+			if (seen.has(dedupKey)) continue;
+			seen.add(dedupKey);
+
 			events.push({
 				model: typeof msg.model === 'string' ? msg.model : 'unknown',
 				ts: typeof obj.timestamp === 'string' ? obj.timestamp : new Date().toISOString(),
-				input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
-				output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
-				cache_read: typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0,
-				cache_creation: typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0,
+				input_tokens: inp,
+				output_tokens: out,
+				cache_read: cr,
+				cache_creation: cc,
 				cost_usd: 0,
 				message_id: messageId,
 				request_id: requestId,
 				session_id: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
 				project_hash: hashProject(obj.cwd),
 				tool_name: firstTool,
+				is_subagent: isSubagent,
 			});
 		}
 	}
 
 	if (totalMessages === 0 && events.length === 0) return null;
-	return { cli: 'claude_code', events, meta: buildMeta(totalMessages, timestamps, hourCounts) };
+	const rootSids = new Set();
+	const subSids = new Set();
+	for (const e of events) {
+		if (!e.session_id) continue;
+		(e.is_subagent ? subSids : rootSids).add(e.session_id);
+	}
+	return {
+		cli: 'claude_code',
+		events,
+		meta: { ...buildMeta(totalMessages, timestamps, hourCounts), rootSessions: rootSids.size, subagentSessions: subSids.size },
+	};
 }
 
 // ---------- OpenCode (SQLite + legacy JSON) ----------
@@ -166,6 +195,7 @@ function extractOpenCodeMessageFromJson(parsed, fallbackId, fallbackTs) {
 			session_id: parsed.sessionID ? String(parsed.sessionID) : undefined,
 			project_hash: hashProject(parsed.path?.cwd),
 			tool_name: undefined,
+			is_subagent: false,
 		},
 		ts,
 		id,
@@ -415,6 +445,7 @@ function extractCodex() {
 				session_id: sessionId,
 				project_hash: undefined,
 				tool_name: undefined,
+				is_subagent: false,
 			});
 
 			prev = { input: cumInput, output: cumOutput, cacheRead: cumCacheRead, cacheCreation: cumCacheCreation };

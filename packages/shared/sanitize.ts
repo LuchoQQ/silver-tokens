@@ -19,6 +19,7 @@ export function sanitizeJsonlLine(line: string): SafeEvent | null {
     if (typeof raw.message_id === 'string') safe.message_id = raw.message_id;
     if (typeof raw.request_id === 'string') safe.request_id = raw.request_id;
     if (typeof raw.session_id === 'string') safe.session_id = raw.session_id;
+    if (typeof raw.is_subagent === 'boolean') safe.is_subagent = raw.is_subagent;
 
     const result = safeEventSchema.safeParse(safe);
     if (!result.success) return null;
