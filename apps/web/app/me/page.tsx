@@ -80,7 +80,16 @@ export default async function MePage() {
       <main className="container mx-auto px-4 py-8 max-w-4xl">
         {userScorecard ? (
           <section className="mb-10">
-            <h2 className="text-lg font-semibold mb-4">Your Scorecard</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Your Scorecard</h2>
+              <a
+                href="/api/me/export"
+                download
+                className="inline-flex items-center justify-center rounded-md border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted"
+              >
+                Export my data
+              </a>
+            </div>
             <UserMetrics
               user={{
                 id: session.user.id,
