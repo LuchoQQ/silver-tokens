@@ -8,6 +8,7 @@ const publicOrigin = process.env.MCP_PUBLIC_URL ?? `http://localhost:${port}`;
 
 const extractorScript = await Bun.file(new URL('./extractors/silver.mjs', import.meta.url)).text();
 const legacyClaudeCodeScript = await Bun.file(new URL('./extractors/claude-code.mjs', import.meta.url)).text();
+const syncScriptTemplate = await Bun.file(new URL('./extractors/silver-sync.mjs', import.meta.url)).text();
 
 const sessions: Map<string, { transport: WebStandardStreamableHTTPServerTransport; userId: string; tokenValue: string }> = new Map();
 
@@ -170,6 +171,43 @@ function createServer(userId: string, tokenValue: string) {
     }),
   );
 
+  server.prompt(
+    'setup_auto_sync',
+    'Configure once-a-day auto-sync via a Claude Code SessionEnd hook (no LLM tokens, no user time)',
+    async () => {
+      const uploadUrl = `${publicOrigin}/u/${tokenValue}/upload`;
+      const syncScript = syncScriptTemplate.replace(/__SILVER_URL__/g, uploadUrl);
+      return {
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: [
+                'Set up automatic daily sync of my AI-CLI usage to Silver. Steps:',
+                '',
+                '1. Save the script below verbatim to `~/.silver-sync.mjs` using the Write tool. Do not modify it — copy every byte exactly. The candidate-specific upload URL is already inlined.',
+                '',
+                `2. Download the extractor with this Bash command:\n   curl -fsSL ${publicOrigin}/extract/silver.mjs -o ~/.silver-extract.mjs`,
+                '',
+                '3. Install the SessionEnd hook (this safely merges into ~/.claude/settings.json without clobbering existing hooks):\n   node ~/.silver-sync.mjs --install-hook',
+                '',
+                '4. Verify by running it once manually:\n   node ~/.silver-sync.mjs --worker',
+                '   (extracts and uploads immediately so the candidate sees fresh data on /me without waiting for the next session-end)',
+                '',
+                'After this, every time the candidate closes a Claude Code session, the hook runs in background, rate-limited to once per UTC day. Zero LLM tokens, no perceptible latency. To remove later: `node ~/.silver-sync.mjs --uninstall-hook`.',
+                '',
+                '--- begin script ---',
+                syncScript,
+                '--- end script ---',
+              ].join('\n'),
+            },
+          },
+        ],
+      };
+    },
+  );
+
   return server;
 }
 
@@ -187,6 +225,15 @@ const httpServer = Bun.serve({
 
       if (url.pathname === '/extract/silver.mjs' || url.pathname === '/extract/silver.js') {
         return new Response(extractorScript, {
+          headers: { 'Content-Type': 'text/javascript', 'Cache-Control': 'public, max-age=300' },
+        });
+      }
+
+      if (url.pathname === '/extract/silver-sync.mjs') {
+        // Served as TEMPLATE (with __SILVER_URL__ unreplaced). The personalized
+        // version is delivered through the /mcp__silver__setup_auto_sync prompt.
+        // Direct download is here for power users who want to inspect the source.
+        return new Response(syncScriptTemplate, {
           headers: { 'Content-Type': 'text/javascript', 'Cache-Control': 'public, max-age=300' },
         });
       }
