@@ -96,7 +96,7 @@ function createServer(userId: string, tokenValue: string) {
               '',
               '1. Save the script below verbatim to `./.silver-extract.mjs` in the current working directory using the Write tool. Do not modify it — copy every byte exactly.',
               '',
-              `2. Run this Bash command and print the stdout verbatim (it is the scorecard JSON, do not parse or summarize):\n   node ./.silver-extract.mjs | curl -fsSL -X POST -H "Content-Type: application/json" --data-binary @- "${publicOrigin}/u/${tokenValue}/upload"`,
+              `2. Run this Bash command and print the stdout verbatim (it is the scorecard JSON, do not parse or summarize):\n   node ./.silver-extract.mjs | gzip -c | curl -fsSL -X POST -H "Content-Type: application/json" -H "Content-Encoding: gzip" --data-binary @- "${publicOrigin}/u/${tokenValue}/upload"`,
               '',
               '3. After printing the response, delete `./.silver-extract.mjs`.',
               '',
@@ -169,7 +169,21 @@ const httpServer = Bun.serve({
             { status: 413, headers: { 'Content-Type': 'application/json' } },
           );
         }
-        const body = await request.json();
+        const encoding = request.headers.get('content-encoding')?.toLowerCase();
+        let body: unknown;
+        if (encoding === 'gzip') {
+          const compressed = new Uint8Array(await request.arrayBuffer());
+          const decompressed = Bun.gunzipSync(compressed);
+          if (decompressed.byteLength > 50_000_000) {
+            return new Response(
+              JSON.stringify({ error: 'payload_too_large', detail: 'decompressed body exceeds 50MB' }),
+              { status: 413, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+          body = JSON.parse(new TextDecoder().decode(decompressed));
+        } else {
+          body = await request.json();
+        }
         const { status, body: respBody } = await processUpload(userId, body as { cli?: unknown; events?: unknown });
         return new Response(JSON.stringify(respBody), {
           status,
