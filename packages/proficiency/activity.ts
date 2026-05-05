@@ -22,8 +22,11 @@ export function computeActivity(events: ActivityEvent[]): ActivityResult {
 		return { messages: 0, totalTokens: 0, activeDays: 0, currentStreak: 0, longestStreak: 0, peakHour: null, favoriteModel: null };
 	}
 
+	// Net tokens — input + output only. Cache reads are re-served context that
+	// can dwarf the rest by 100x in long sessions, so they're misleading as a
+	// "tokens used" headline. Cache rate has its own metric.
 	const totalTokens = events.reduce(
-		(sum, e) => sum + (e.inputTokens || 0) + (e.outputTokens || 0) + (e.cacheRead || 0) + (e.cacheCreation || 0),
+		(sum, e) => sum + (e.inputTokens || 0) + (e.outputTokens || 0),
 		0,
 	);
 

@@ -25,7 +25,7 @@ type RawEvent = {
   session_id?: unknown;
 };
 
-async function processUpload(userId: string, body: { cli?: unknown; events?: unknown }) {
+async function processUpload(userId: string, body: { cli?: unknown; events?: unknown; meta?: unknown }) {
   const cli = body.cli;
   if (cli !== 'claude_code' && cli !== 'codex' && cli !== 'opencode') {
     return { status: 400, body: { error: 'invalid_cli', detail: 'cli must be claude_code, codex, or opencode' } };
@@ -33,6 +33,15 @@ async function processUpload(userId: string, body: { cli?: unknown; events?: unk
   if (!Array.isArray(body.events)) {
     return { status: 400, body: { error: 'invalid_events', detail: 'events must be an array' } };
   }
+
+  const rawMeta = (body.meta && typeof body.meta === 'object') ? body.meta as Record<string, unknown> : {};
+  const meta = {
+    totalMessages: typeof rawMeta.totalMessages === 'number' ? rawMeta.totalMessages : undefined,
+    activeDays: typeof rawMeta.activeDays === 'number' ? rawMeta.activeDays : undefined,
+    currentStreak: typeof rawMeta.currentStreak === 'number' ? rawMeta.currentStreak : undefined,
+    longestStreak: typeof rawMeta.longestStreak === 'number' ? rawMeta.longestStreak : undefined,
+    peakHourLocal: typeof rawMeta.peakHourLocal === 'number' ? rawMeta.peakHourLocal : undefined,
+  };
 
   const sanitized = (body.events as RawEvent[])
     .map((e) => ({
@@ -57,7 +66,7 @@ async function processUpload(userId: string, body: { cli?: unknown; events?: unk
   }
 
   const inserted = await insertEvents(userId, sanitized);
-  const scorecard = await computeAndSaveScorecard(userId);
+  const scorecard = await computeAndSaveScorecard(userId, meta);
 
   return {
     status: 200,

@@ -75,7 +75,15 @@ export async function markTokenUsed(value: string): Promise<void> {
     .where(eq(tokens.value, value));
 }
 
-export async function computeAndSaveScorecard(userId: string): Promise<{ payload: Record<string, unknown> } | null> {
+export interface UploadMeta {
+  totalMessages?: number;
+  activeDays?: number;
+  currentStreak?: number;
+  longestStreak?: number;
+  peakHourLocal?: number;
+}
+
+export async function computeAndSaveScorecard(userId: string, meta?: UploadMeta): Promise<{ payload: Record<string, unknown> } | null> {
   const userEvents = await db.query.events.findMany({
     where: eq(events.userId, userId),
   });
@@ -98,6 +106,14 @@ export async function computeAndSaveScorecard(userId: string): Promise<{ payload
   const toolDist = computeToolDistribution(normalized);
   const sessions = computeSessions(normalized);
   const activity = computeActivity(normalized);
+
+  // Note: extractors emit `meta` with raw JSONL line counts for telemetry, but we
+  // intentionally DO NOT override activity values with it. Different CLIs write
+  // different numbers of lines per assistant turn (Claude Code ~6-7, Codex ~1),
+  // so using line counts would inflate scorecards for users on chattier CLIs.
+  // Activity stays derived from the events table — one row per billable
+  // assistant turn — which is the only unit comparable across CLIs.
+  void meta;
 
   const payload = {
     fluencyPercentile: 50,

@@ -4,6 +4,10 @@ interface ScorecardPayload {
   modelMix?: Record<string, number>;
   toolDistribution?: Record<string, number>;
   confidence?: string;
+  sessions?: {
+    totalSessions?: number;
+    avgTokensPerSession?: number;
+  };
   activity?: {
     messages?: number;
     totalTokens?: number;
@@ -51,8 +55,11 @@ interface UserMetricsProps {
 export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
   const payload = scorecard?.payload as ScorecardPayload | undefined;
   const totalCost = events.reduce((sum, e) => sum + parseFloat(e.costUsd ?? '0'), 0);
-  const totalTokens = events.reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
-  const sessions = new Set(events.map((e) => e.sessionId).filter(Boolean)).size;
+  // Prefer payload values (computed server-side over all events) over the
+  // partial values from the recent-100-events slice rendered in the table.
+  const sessions = payload?.sessions?.totalSessions ?? new Set(events.map((e) => e.sessionId).filter(Boolean)).size;
+  const totalTokens = payload?.activity?.totalTokens ?? events.reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
+  const avgTokensPerSession = payload?.sessions?.avgTokensPerSession ?? (sessions > 0 ? totalTokens / sessions : 0);
 
   return (
     <div className="space-y-6">
@@ -66,19 +73,20 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
 
       {/* Secondary metrics */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MetricCard label="Total Tokens" value={payload?.activity?.totalTokens != null ? formatTokens(payload.activity.totalTokens) : (totalTokens > 0 ? formatTokens(totalTokens) : '--')} />
-        <MetricCard label="Avg Tokens/Session" value={sessions > 0 ? Math.round(totalTokens / sessions).toLocaleString() : '--'} />
+        <MetricCard label="Total Tokens" value={totalTokens > 0 ? formatTokens(totalTokens) : '--'} />
+        <MetricCard label="Avg Tokens/Session" value={sessions > 0 ? Math.round(avgTokensPerSession).toLocaleString() : '--'} />
         <MetricCard label="Confidence" value={payload?.confidence ?? '--'} />
       </div>
 
-      {/* Activity */}
+      {/* Activity — all values normalized to billable assistant turns so they
+          remain comparable across Claude Code / Codex / OpenCode. */}
       {payload?.activity && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <MetricCard label="Messages" value={payload.activity.messages?.toLocaleString() ?? '--'} />
+          <MetricCard label="Turns" value={payload.activity.messages?.toLocaleString() ?? '--'} />
           <MetricCard label="Active Days" value={payload.activity.activeDays?.toString() ?? '--'} />
           <MetricCard label="Current Streak" value={payload.activity.currentStreak != null ? `${payload.activity.currentStreak}d` : '--'} />
           <MetricCard label="Longest Streak" value={payload.activity.longestStreak != null ? `${payload.activity.longestStreak}d` : '--'} />
-          <MetricCard label="Peak Hour" value={payload.activity.peakHour != null ? `${String(payload.activity.peakHour).padStart(2, '0')}:00 UTC` : '--'} />
+          <MetricCard label="Peak Hour (UTC)" value={payload.activity.peakHour != null ? `${String(payload.activity.peakHour).padStart(2, '0')}:00` : '--'} />
           <MetricCard label="Favorite Model" value={payload.activity.favoriteModel ?? '--'} />
         </div>
       )}

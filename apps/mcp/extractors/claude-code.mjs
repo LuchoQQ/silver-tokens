@@ -32,6 +32,10 @@ function hashProject(cwd) {
 }
 
 const events = [];
+let totalMessages = 0;
+const allTimestamps = [];
+const localHourCounts = new Array(24).fill(0);
+
 for (const file of walk(ROOT)) {
 	let raw;
 	try { raw = readFileSync(file, 'utf8'); } catch { continue; }
@@ -39,6 +43,17 @@ for (const file of walk(ROOT)) {
 		if (!line.trim()) continue;
 		let obj;
 		try { obj = JSON.parse(line); } catch { continue; }
+
+		// Count every parseable line as a "message" — matches Claude Code Desktop's count.
+		totalMessages++;
+		if (typeof obj?.timestamp === 'string') {
+			const d = new Date(obj.timestamp);
+			if (!isNaN(d.getTime())) {
+				allTimestamps.push(d);
+				localHourCounts[d.getHours()]++;
+			}
+		}
+
 		if (obj?.type !== 'assistant') continue;
 		const msg = obj.message;
 		if (!msg || typeof msg !== 'object') continue;
@@ -72,4 +87,44 @@ for (const file of walk(ROOT)) {
 	}
 }
 
-process.stdout.write(JSON.stringify({ cli: 'claude_code', events }));
+// Compute active days + streaks from ALL line timestamps (not just assistant turns).
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const activeDaySet = new Set(allTimestamps.map(dayKey));
+const sortedDays = [...activeDaySet].sort();
+
+let longestStreak = 0;
+let currentRun = 0;
+let prevDay = null;
+for (const day of sortedDays) {
+	const d = new Date(`${day}T00:00:00`);
+	if (prevDay && (d.getTime() - prevDay.getTime()) === 86_400_000) currentRun++;
+	else currentRun = 1;
+	if (currentRun > longestStreak) longestStreak = currentRun;
+	prevDay = d;
+}
+
+let currentStreak = 0;
+const today = new Date();
+const todayK = dayKey(today);
+const yesterdayK = dayKey(new Date(today.getTime() - 86_400_000));
+if (activeDaySet.has(todayK) || activeDaySet.has(yesterdayK)) {
+	const cursor = new Date(activeDaySet.has(todayK) ? today : new Date(today.getTime() - 86_400_000));
+	while (activeDaySet.has(dayKey(cursor))) {
+		currentStreak++;
+		cursor.setDate(cursor.getDate() - 1);
+	}
+}
+
+const peakHourLocal = localHourCounts.some((c) => c > 0) ? localHourCounts.indexOf(Math.max(...localHourCounts)) : null;
+
+process.stdout.write(JSON.stringify({
+	cli: 'claude_code',
+	events,
+	meta: {
+		totalMessages,
+		activeDays: activeDaySet.size,
+		currentStreak,
+		longestStreak,
+		peakHourLocal,
+	},
+}));
