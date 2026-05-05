@@ -4,6 +4,15 @@ interface ScorecardPayload {
   modelMix?: Record<string, number>;
   toolDistribution?: Record<string, number>;
   confidence?: string;
+  activity?: {
+    messages?: number;
+    totalTokens?: number;
+    activeDays?: number;
+    currentStreak?: number;
+    longestStreak?: number;
+    peakHour?: number | null;
+    favoriteModel?: string | null;
+  };
 }
 
 interface DbUser {
@@ -57,10 +66,22 @@ export function UserMetrics({ user, scorecard, events }: UserMetricsProps) {
 
       {/* Secondary metrics */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <MetricCard label="Total Tokens" value={totalTokens > 0 ? totalTokens.toLocaleString() : '--'} />
+        <MetricCard label="Total Tokens" value={payload?.activity?.totalTokens != null ? formatTokens(payload.activity.totalTokens) : (totalTokens > 0 ? formatTokens(totalTokens) : '--')} />
         <MetricCard label="Avg Tokens/Session" value={sessions > 0 ? Math.round(totalTokens / sessions).toLocaleString() : '--'} />
         <MetricCard label="Confidence" value={payload?.confidence ?? '--'} />
       </div>
+
+      {/* Activity */}
+      {payload?.activity && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <MetricCard label="Messages" value={payload.activity.messages?.toLocaleString() ?? '--'} />
+          <MetricCard label="Active Days" value={payload.activity.activeDays?.toString() ?? '--'} />
+          <MetricCard label="Current Streak" value={payload.activity.currentStreak != null ? `${payload.activity.currentStreak}d` : '--'} />
+          <MetricCard label="Longest Streak" value={payload.activity.longestStreak != null ? `${payload.activity.longestStreak}d` : '--'} />
+          <MetricCard label="Peak Hour" value={payload.activity.peakHour != null ? `${String(payload.activity.peakHour).padStart(2, '0')}:00 UTC` : '--'} />
+          <MetricCard label="Favorite Model" value={payload.activity.favoriteModel ?? '--'} />
+        </div>
+      )}
 
       {/* Model mix */}
       {payload?.modelMix && Object.keys(payload.modelMix).length > 0 && (
@@ -130,4 +151,10 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <div className="text-2xl font-bold mt-1">{value}</div>
     </div>
   );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
 }

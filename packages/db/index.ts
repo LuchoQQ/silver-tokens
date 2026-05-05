@@ -7,6 +7,7 @@ import { computeCacheRate } from '@silver-tokens/proficiency/cache-rate';
 import { computeModelMix } from '@silver-tokens/proficiency/model-mix';
 import { computeToolDistribution } from '@silver-tokens/proficiency/tool-distribution';
 import { computeSessions } from '@silver-tokens/proficiency/sessions';
+import { computeActivity } from '@silver-tokens/proficiency/activity';
 import type { SafeEvent } from '@silver-tokens/shared/wire';
 
 const client = postgres(process.env.DATABASE_URL!, {
@@ -96,6 +97,7 @@ export async function computeAndSaveScorecard(userId: string): Promise<{ payload
   const modelMix = computeModelMix(normalized);
   const toolDist = computeToolDistribution(normalized);
   const sessions = computeSessions(normalized);
+  const activity = computeActivity(normalized);
 
   const payload = {
     fluencyPercentile: 50,
@@ -103,6 +105,7 @@ export async function computeAndSaveScorecard(userId: string): Promise<{ payload
     modelMix,
     toolDistribution: toolDist,
     sessions,
+    activity,
     confidence: 'medium',
     totalEvents: userEvents.length,
     computedAt: new Date().toISOString(),

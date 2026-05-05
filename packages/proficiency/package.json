@@ -8,7 +8,8 @@
     "./model-mix": "./model-mix.ts",
     "./tool-distribution": "./tool-distribution.ts",
     "./fluency": "./fluency.ts",
-    "./sessions": "./sessions.ts"
+    "./sessions": "./sessions.ts",
+    "./activity": "./activity.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
