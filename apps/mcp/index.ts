@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { gunzipSync } from 'node:zlib';
 import { validateToken, insertEvents, computeAndSaveScorecard } from '@silver-tokens/db';
 
 const port = parseInt(process.env.PORT || '3001', 10);
@@ -96,7 +97,7 @@ function createServer(userId: string, tokenValue: string) {
               '',
               '1. Save the script below verbatim to `./.silver-extract.mjs` in the current working directory using the Write tool. Do not modify it — copy every byte exactly.',
               '',
-              `2. Run this Bash command and print the stdout verbatim (it is the scorecard JSON, do not parse or summarize):\n   node ./.silver-extract.mjs | gzip -c | curl -fsSL -X POST -H "Content-Type: application/json" -H "Content-Encoding: gzip" --data-binary @- "${publicOrigin}/u/${tokenValue}/upload"`,
+              `2. Run this Bash command and print the stdout verbatim (it is the scorecard JSON, do not parse or summarize):\n   node ./.silver-extract.mjs | gzip -c | curl -sS -X POST -H "Content-Type: application/json" -H "Content-Encoding: gzip" --data-binary @- "${publicOrigin}/u/${tokenValue}/upload"`,
               '',
               '3. After printing the response, delete `./.silver-extract.mjs`.',
               '',
@@ -169,20 +170,29 @@ const httpServer = Bun.serve({
             { status: 413, headers: { 'Content-Type': 'application/json' } },
           );
         }
-        const encoding = request.headers.get('content-encoding')?.toLowerCase();
-        let body: unknown;
-        if (encoding === 'gzip') {
-          const compressed = new Uint8Array(await request.arrayBuffer());
-          const decompressed = Bun.gunzipSync(compressed);
+        const buf = new Uint8Array(await request.arrayBuffer());
+        const isGzip = buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+        let text: string;
+        if (isGzip) {
+          const decompressed = gunzipSync(buf);
           if (decompressed.byteLength > 50_000_000) {
             return new Response(
               JSON.stringify({ error: 'payload_too_large', detail: 'decompressed body exceeds 50MB' }),
               { status: 413, headers: { 'Content-Type': 'application/json' } },
             );
           }
-          body = JSON.parse(new TextDecoder().decode(decompressed));
+          text = new TextDecoder().decode(decompressed);
         } else {
-          body = await request.json();
+          text = new TextDecoder().decode(buf);
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch (parseErr) {
+          return new Response(
+            JSON.stringify({ error: 'invalid_json', detail: parseErr instanceof Error ? parseErr.message : String(parseErr) }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
         }
         const { status, body: respBody } = await processUpload(userId, body as { cli?: unknown; events?: unknown });
         return new Response(JSON.stringify(respBody), {

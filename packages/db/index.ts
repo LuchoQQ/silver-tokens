@@ -48,15 +48,23 @@ export async function insertEvents(userId: string, rawEvents: SafeEvent[]): Prom
     sessionId: e.session_id ?? null,
   }));
 
-  const inserted = await db
-    .insert(events)
-    .values(rows)
-    .onConflictDoNothing({
-      target: [events.messageId, events.requestId],
-    })
-    .returning({ id: events.id });
+  // postgres-js caps bind parameters at 65534 per query. With 14 columns per row,
+  // chunk to stay well under that ceiling (4000 rows × 14 = 56000 params).
+  const CHUNK_SIZE = 4000;
+  let totalInserted = 0;
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    const inserted = await db
+      .insert(events)
+      .values(chunk)
+      .onConflictDoNothing({
+        target: [events.messageId, events.requestId],
+      })
+      .returning({ id: events.id });
+    totalInserted += inserted.length;
+  }
 
-  return inserted.length;
+  return totalInserted;
 }
 
 export async function markTokenUsed(value: string): Promise<void> {
