@@ -195,7 +195,7 @@ export function StaffDashboard({ users: initialUsers }: StaffDashboardProps) {
           <Tile label="Candidates" value={total} sub={`${active} active · ${total - active} stale`} />
           <Tile label="Active today" value="14" sub="↑ 3 vs yesterday" />
           <Tile label="Pool cache median" value={medianCache + "%"} sub="p25=78 · p75=92" featured />
-          <Tile label="Pool spend · 30d" value={"$" + totalSpend.toFixed(0)} sub="across all candidates" />
+          <Tile label="Pool API-equiv · 30d" value={"$" + totalSpend.toFixed(0)} sub="list price, not flat-plan billing" />
         </div>
 
         <div className="table-wrap">
@@ -234,7 +234,7 @@ export function StaffDashboard({ users: initialUsers }: StaffDashboardProps) {
                 <th className="num">Active</th>
                 <th>CLIs</th>
                 <th>Favorite model</th>
-                <th className="num">Spend</th>
+                <th className="num" title="API-equivalent cost at list price. Doesn't reflect flat-plan billing.">API-equiv $</th>
                 <th>Last seen</th>
               </tr>
             </thead>

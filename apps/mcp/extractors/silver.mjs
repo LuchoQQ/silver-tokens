@@ -10,6 +10,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
+import { computeCost } from '@silver-tokens/shared/cost';
 
 const HOME = process.env.HOME ?? process.env.USERPROFILE ?? '';
 
@@ -139,14 +140,15 @@ function extractClaudeCode() {
 			if (seen.has(dedupKey)) continue;
 			seen.add(dedupKey);
 
+			const ccModel = typeof msg.model === 'string' ? msg.model : 'unknown';
 			events.push({
-				model: typeof msg.model === 'string' ? msg.model : 'unknown',
+				model: ccModel,
 				ts: typeof obj.timestamp === 'string' ? obj.timestamp : new Date().toISOString(),
 				input_tokens: inp,
 				output_tokens: out,
 				cache_read: cr,
 				cache_creation: cc,
-				cost_usd: 0,
+				cost_usd: computeCost(ccModel, { input: inp, output: out, cacheRead: cr, cacheCreation: cc }),
 				message_id: messageId,
 				request_id: requestId,
 				session_id: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
@@ -432,14 +434,15 @@ function extractCodex() {
 				obj?.message?.id ??
 				`codex:${sessionId}:${turnIndex}`;
 
+			const codexModel = pendingModel ?? 'unknown';
 			events.push({
-				model: pendingModel ?? 'unknown',
+				model: codexModel,
 				ts: tsMs ? new Date(tsMs).toISOString() : new Date().toISOString(),
 				input_tokens: dInput,
 				output_tokens: dOutput,
 				cache_read: dCacheRead,
 				cache_creation: dCacheCreation,
-				cost_usd: 0,
+				cost_usd: computeCost(codexModel, { input: dInput, output: dOutput, cacheRead: dCacheRead, cacheCreation: dCacheCreation }),
 				message_id: String(messageId),
 				request_id: `codex:${sessionId}:${turnIndex}`,
 				session_id: sessionId,

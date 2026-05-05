@@ -351,7 +351,7 @@ export function UserDashboard({ user, payload, events, poolSize = 0 }: UserDashb
             }
           />
           <Tile
-            label="Spend · 30d"
+            label="API-equiv · 30d"
             value={spendStr}
             sub={
               activeDays > 0 ? <span>${(spend30d / activeDays).toFixed(2)} / active day</span> : undefined

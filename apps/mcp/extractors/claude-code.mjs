@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
+import { computeCost } from '@silver-tokens/shared/cost';
 
 const ROOT = `${process.env.HOME ?? process.env.USERPROFILE ?? ''}/.claude/projects`.replace(/\\/g, '/');
 
@@ -70,14 +71,19 @@ for (const file of walk(ROOT)) {
 			}
 		}
 
+		const model = typeof msg.model === 'string' ? msg.model : 'unknown';
+		const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+		const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+		const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+		const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
 		events.push({
-			model: typeof msg.model === 'string' ? msg.model : 'unknown',
+			model,
 			ts: typeof obj.timestamp === 'string' ? obj.timestamp : new Date().toISOString(),
-			input_tokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
-			output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
-			cache_read: typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0,
-			cache_creation: typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0,
-			cost_usd: 0,
+			input_tokens: inputTokens,
+			output_tokens: outputTokens,
+			cache_read: cacheRead,
+			cache_creation: cacheCreation,
+			cost_usd: computeCost(model, { input: inputTokens, output: outputTokens, cacheRead, cacheCreation }),
 			message_id: typeof msg.id === 'string' ? msg.id : undefined,
 			request_id: typeof obj.requestId === 'string' ? obj.requestId : undefined,
 			session_id: typeof obj.sessionId === 'string' ? obj.sessionId : undefined,
